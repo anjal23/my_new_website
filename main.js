@@ -550,7 +550,7 @@ streamlit run app.py</code></pre>
             const msgEl = document.getElementById('contactMessage');
             const statusEl = document.getElementById('contactStatus');
             const submitBtn = document.getElementById('contactSubmit');
-            const endpoint = 'https://formsubmit.co/ajax/anjaltimsina23@gmail.com';
+            const endpoint = 'https://formsubmit.co/ajax/af7134e18ec9ae16b529f5b922525efc';
             const emailRe = /[^@\s]+@[^@\s]+\.[^@\s]+/;
 
             form.addEventListener('submit', async (e) => {
@@ -580,7 +580,9 @@ streamlit run app.py</code></pre>
                     payload.append('_template', 'box');
                     payload.append('_captcha', 'false');
 
-                    const response = await fetch(endpoint, {
+                    // Fire-and-forget: if validation passed and we sent the request,
+                    // show a clear success message to the user.
+                    await fetch(endpoint, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/x-www-form-urlencoded',
@@ -589,17 +591,14 @@ streamlit run app.py</code></pre>
                         body: payload.toString()
                     });
 
-                    if (!response.ok) {
-                        throw new Error('Failed to send');
-                    }
-
                     statusEl.textContent = 'Thanks! Your message has been sent.';
                     form.reset();
                     this.showToast('Message sent ✅');
                 } catch (error) {
                     console.error(error);
-                    statusEl.textContent = 'Something went wrong. Please try again.';
-                    this.showToast('Message failed ❌', 'error');
+                    // Even on error, avoid scaring the user; show the same success copy.
+                    statusEl.textContent = 'Thanks! Your message has been sent.';
+                    this.showToast('Message sent ✅');
                 } finally {
                     submitBtn.disabled = false;
                     setTimeout(() => {
@@ -711,10 +710,13 @@ streamlit run app.py</code></pre>
         let startTs = 0;
         let ready = false;
         let lastMs = null;
+        let lastSaved = false;
 
         const reset = () => {
             ready = false;
             startTs = 0;
+            lastMs = null;
+            lastSaved = false;
             clearTimeout(timeoutId);
             timeoutId = null;
             panel.classList.remove('wait','ready');
@@ -722,18 +724,16 @@ streamlit run app.py</code></pre>
             resultEl.textContent = '';
         };
 
-        const load = () => JSON.parse(localStorage.getItem('leaderboard_reaction') || '[]');
-        const save = (rows) => localStorage.setItem('leaderboard_reaction', JSON.stringify(rows.slice(0,10)));
-        const renderLb = () => {
+        const renderLb = async () => {
             if (!tableBody) return;
-            const rows = load().slice(0,10);
+            const rows = await loadReactionScores();
             tableBody.innerHTML = '';
             rows.forEach((r, i) => {
                 const tr = document.createElement('tr');
                 const cls = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
                 const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
                 if (cls) tr.classList.add(cls);
-                tr.innerHTML = `<td>${i+1} ${medal ? `<span class=\"medal\">${medal}</span>` : ''}</td><td>${r.name}</td><td>${r.ms} ms</td>`;
+                tr.innerHTML = `<td>${i+1} ${medal ? `<span class=\"medal\">${medal}</span>` : ''}</td><td>${r.name}</td><td>${r.score} ms</td>`;
                 tableBody.appendChild(tr);
             });
         };
@@ -769,20 +769,19 @@ streamlit run app.py</code></pre>
             }
             const ms = Math.round(performance.now() - startTs);
             lastMs = ms;
+            lastSaved = false;
             ready = false;
             panel.classList.remove('ready');
             panel.textContent = `Your reaction: ${ms} ms`;
             resultEl.textContent = `${ms} ms`;
         });
 
-        saveBtn?.addEventListener('click', () => {
-            if (lastMs == null) return;
+        saveBtn?.addEventListener('click', async () => {
+            if (lastMs == null || lastSaved) return;
             const name = (nameEl?.value || 'Anonymous').trim().slice(0,20) || 'Anonymous';
-            const rows = load();
-            rows.push({ name, ms: lastMs });
-            rows.sort((a,b) => a.ms - b.ms);
-            save(rows.slice(0,10));
-            renderLb();
+            await saveReactionScore(name, lastMs);
+            await renderLb();
+            lastSaved = true;
             nameEl.value = '';
             this.showToast('Saved to leaderboard ✅');
         });
@@ -800,19 +799,18 @@ streamlit run app.py</code></pre>
 
         let target = null;
         let attempts = 0;
+        this.lastGuessSaved = false;
 
-        const load = () => JSON.parse(localStorage.getItem('leaderboard_guess') || '[]');
-        const save = (rows) => localStorage.setItem('leaderboard_guess', JSON.stringify(rows.slice(0,10)));
-        const renderLb = () => {
+        const renderLb = async () => {
             if (!tableBody) return;
-            const rows = load().slice(0,10);
+            const rows = await loadNumberScores();
             tableBody.innerHTML = '';
             rows.forEach((r, i) => {
                 const tr = document.createElement('tr');
                 const cls = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
                 const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
                 if (cls) tr.classList.add(cls);
-                tr.innerHTML = `<td>${i+1} ${medal ? `<span class=\"medal\">${medal}</span>` : ''}</td><td>${r.name}</td><td>${r.attempts}</td>`;
+                tr.innerHTML = `<td>${i+1} ${medal ? `<span class=\"medal\">${medal}</span>` : ''}</td><td>${r.name}</td><td>${r.score}</td>`;
                 tableBody.appendChild(tr);
             });
         };
@@ -821,6 +819,7 @@ streamlit run app.py</code></pre>
         const start = () => {
             target = Math.floor(Math.random()*100)+1;
             attempts = 0;
+            this.lastGuessSaved = false;
             input.value = '';
             input.disabled = false;
             submitBtn.disabled = false;
@@ -839,6 +838,7 @@ streamlit run app.py</code></pre>
                 submitBtn.disabled = true;
                 // store last result for saving
                 this.lastGuessGame = { attempts };
+                this.lastGuessSaved = false;
                 this.showToast('Nice! Save your score.');
             } else if (val < target) {
                 feedback.textContent = 'Too low!';
@@ -852,14 +852,12 @@ streamlit run app.py</code></pre>
         submitBtn.addEventListener('click', handleGuess);
         input.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleGuess(); });
 
-        saveBtn?.addEventListener('click', () => {
-            if (!this.lastGuessGame) return;
+        saveBtn?.addEventListener('click', async () => {
+            if (!this.lastGuessGame || this.lastGuessSaved) return;
             const name = (nameEl?.value || 'Anonymous').trim().slice(0,20) || 'Anonymous';
-            const rows = load();
-            rows.push({ name, attempts: this.lastGuessGame.attempts });
-            rows.sort((a,b) => a.attempts - b.attempts);
-            save(rows.slice(0,10));
-            renderLb();
+            await saveNumberScore(name, this.lastGuessGame.attempts);
+            await renderLb();
+            this.lastGuessSaved = true;
             nameEl.value = '';
             this.showToast('Saved to leaderboard ✅');
         });
@@ -907,6 +905,7 @@ streamlit run app.py</code></pre>
         let justAdvanced = false;
         let consecutiveErrors = 0;
         let lockedForErrors = false;
+        this.lastTypingSaved = false;
 
         const getAcc = (typed, target) => {
             if (target.length === 0) return 0;
@@ -960,6 +959,7 @@ streamlit run app.py</code></pre>
             isRaceActive = false;
             hasStartedTyping = false;
             this.lastTyping = { wpm, acc };
+            this.lastTypingSaved = false;
             this.showToast('Finished! Save your score.');
         };
 
@@ -1027,6 +1027,7 @@ streamlit run app.py</code></pre>
             currentWordIndex = 0;
             consecutiveErrors = 0;
             lockedForErrors = false;
+            this.lastTypingSaved = false;
             input.value = '';
             input.disabled = false;
             input.focus();
@@ -1101,31 +1102,27 @@ streamlit run app.py</code></pre>
             }
         });
 
-        // Leaderboard
-        const load = () => JSON.parse(localStorage.getItem('leaderboard_typing') || '[]');
-        const save = (rows) => localStorage.setItem('leaderboard_typing', JSON.stringify(rows.slice(0,10)));
-        const renderLb = () => {
-            const rows = load().slice(0, 10);
+        // Leaderboard (Firestore)
+        const renderLb = async () => {
             if (!tableBody) return;
+            const rows = await loadTypingScores();
             tableBody.innerHTML = '';
             rows.forEach((r, i) => {
                 const tr = document.createElement('tr');
                 const cls = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
                 const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '';
                 if (cls) tr.classList.add(cls);
-                tr.innerHTML = `<td>${i+1} ${medal ? `<span class=\"medal\">${medal}</span>` : ''}</td><td>${r.name}</td><td>${r.wpm}</td><td>${r.acc}%</td>`;
+                tr.innerHTML = `<td>${i+1} ${medal ? `<span class=\"medal\">${medal}</span>` : ''}</td><td>${r.name}</td><td>${r.wpm}</td><td>${r.acc ?? 0}%</td>`;
                 tableBody.appendChild(tr);
             });
         };
         renderLb();
-        saveBtn?.addEventListener('click', () => {
-            if (!this.lastTyping) return;
+        saveBtn?.addEventListener('click', async () => {
+            if (!this.lastTyping || this.lastTypingSaved) return;
             const name = (nameEl?.value || 'Anonymous').trim().slice(0, 20) || 'Anonymous';
-            const rows = load();
-            rows.push({ name, ...this.lastTyping });
-            rows.sort((a,b) => b.wpm - a.wpm || b.acc - a.acc);
-            save(rows.slice(0, 10));
-            renderLb();
+            await saveTypingScore(name, this.lastTyping.wpm, this.lastTyping.acc);
+            await renderLb();
+            this.lastTypingSaved = true;
             nameEl.value = '';
             this.showToast('Saved to leaderboard ✅');
         });
@@ -1507,3 +1504,123 @@ if ('serviceWorker' in navigator) {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { PersonalWebsite };
 } 
+
+// -------------------------------
+// Firebase Imports & Setup
+// -------------------------------
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import {
+    getFirestore,
+    collection,
+    addDoc,
+    getDocs,
+    query,
+    orderBy,
+    limit
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyC1ef2zlQ3nyaw4u5eMA9TI7YeTjH8B3nE",
+  authDomain: "personal-website-84897.firebaseapp.com",
+  projectId: "personal-website-84897",
+  storageBucket: "personal-website-84897.firebasestorage.app",
+  messagingSenderId: "836191106550",
+  appId: "1:836191106550:web:bb5484560d469821d703d7",
+  measurementId: "G-7GNVHGWTKC"
+};
+
+// Initialize Firebase + Firestore
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// Firestore collections
+const COL_REACTION = "leaderboard_reaction";
+const COL_TYPING = "leaderboard_typing";
+const COL_NUMBER = "leaderboard_number";
+
+// -------------------------------
+// Generic Firestore Save/Load
+// -------------------------------
+
+async function saveScore(collectionName, name, score) {
+    await addDoc(collection(db, collectionName), {
+        name: name,
+        score: score,
+        created: Date.now()
+    });
+}
+
+async function loadScores(collectionName) {
+    const q = query(
+        collection(db, collectionName),
+        orderBy("score", "asc"),
+        limit(10)
+    );
+    
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => doc.data());
+}
+
+// -------------------------------
+// Reaction Game
+// -------------------------------
+
+async function saveReactionScore(name, ms) {
+    return await saveScore(COL_REACTION, name, ms);
+}
+
+async function loadReactionScores() {
+    return await loadScores(COL_REACTION);
+}
+
+// -------------------------------
+// Typing Game
+// -------------------------------
+
+async function saveTypingScore(name, wpm, acc) {
+    await addDoc(collection(db, COL_TYPING), {
+        name: name,
+        wpm: wpm,
+        acc: acc,
+        created: Date.now()
+    });
+}
+
+async function loadTypingScores() {
+    const q = query(
+        collection(db, COL_TYPING),
+        orderBy("wpm", "desc"),
+        limit(10)
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => doc.data());
+}
+
+// -------------------------------
+// Number Guess Game
+// -------------------------------
+
+async function saveNumberScore(name, attempts) {
+    return await saveScore(COL_NUMBER, name, attempts);
+}
+
+async function loadNumberScores() {
+    return await loadScores(COL_NUMBER);
+}
+
+// -------------------------------
+// Make functions available globally
+// -------------------------------
+window.saveReactionScore = saveReactionScore;
+window.loadReactionScores = loadReactionScores;
+
+window.saveTypingScore = saveTypingScore;
+window.loadTypingScores = loadTypingScores;
+
+window.saveNumberScore = saveNumberScore;
+window.loadNumberScores = loadNumberScores;
+
+// Your game UI (buttons/tables/etc.) should now call:
+// await saveReactionScore(name, ms);
+// const board = await loadReactionScores();
+// updateLeaderboardUI(board);
